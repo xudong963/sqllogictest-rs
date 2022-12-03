@@ -141,10 +141,10 @@ pub enum Condition {
 
 impl Condition {
     /// Evaluate condition on given `targe_name`, returns whether to skip this record.
-    pub fn should_skip(&self, target_name: &str) -> bool {
+    pub fn should_skip(&self, target_names: Vec<&str>) -> bool {
         match self {
-            Condition::OnlyIf { engine_name } => engine_name != target_name,
-            Condition::SkipIf { engine_name } => engine_name == target_name,
+            Condition::OnlyIf { engine_name } => !target_names.contains(&engine_name.as_str()),
+            Condition::SkipIf { engine_name } => target_names.contains(&engine_name.as_str()),
         }
     }
 }
