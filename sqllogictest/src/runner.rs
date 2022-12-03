@@ -26,8 +26,8 @@ pub trait AsyncDB: Send {
     async fn run(&mut self, sql: &str) -> Result<String, Self::Error>;
 
     /// Engine name of current database.
-    fn engine_name(&self) -> &str {
-        ""
+    fn engine_names(&self) -> Vec<&str> {
+        vec![""]
     }
 
     /// [`Runner`] calls this function to perform sleep.
@@ -49,8 +49,8 @@ pub trait DB: Send {
     fn run(&mut self, sql: &str) -> Result<String, Self::Error>;
 
     /// Engine name of current database.
-    fn engine_name(&self) -> &str {
-        ""
+    fn engine_names(&self) -> Vec<&str> {
+        vec![""]
     }
 }
 
@@ -66,8 +66,8 @@ where
         <D as DB>::run(self, sql)
     }
 
-    fn engine_name(&self) -> &str {
-        <D as DB>::engine_name(self)
+    fn engine_names(&self) -> Vec<&str> {
+        <D as DB>::engine_names(self)
     }
 }
 
@@ -326,7 +326,7 @@ pub trait Hook: Send {
 
 /// Sqllogictest runner.
 pub struct Runner<D: AsyncDB> {
-    db: D,
+    dbs: Vec<D>,
     // validator is used for validate if the result of query equals to expected.
     validator: Validator,
     testdir: Option<TempDir>,
@@ -336,9 +336,9 @@ pub struct Runner<D: AsyncDB> {
 
 impl<D: AsyncDB> Runner<D> {
     /// Create a new test runner on the database.
-    pub fn new(db: D) -> Self {
+    pub fn new(dbs: Vec<D>) -> Self {
         Runner {
-            db,
+            dbs,
             validator: |x, y| x == y,
             testdir: None,
             sort_mode: None,
@@ -364,15 +364,21 @@ impl<D: AsyncDB> Runner<D> {
         match record {
             Record::Statement { conditions, .. } if self.should_skip(&conditions) => {}
             Record::Statement {
-                conditions: _,
+                conditions,
 
                 expected_error,
                 sql,
                 loc,
                 expected_count,
             } => {
+                let mut db = if self.dbs.len() > 1 {
+                    // Choose db to run the statement.
+                    self.choose_db(&conditions)
+                } else {
+                    self.dbs[0].clone()
+                };
                 let sql = self.replace_keywords(sql);
-                let ret = self.db.run(&sql).await;
+                let ret = db.run(&sql).await;
                 match (ret, expected_error) {
                     (Ok(_), Some(_)) => {
                         return Err(TestErrorKind::Ok {
@@ -432,7 +438,7 @@ impl<D: AsyncDB> Runner<D> {
                 label: _,
             } => {
                 let sql = self.replace_keywords(sql);
-                let output = match (self.db.run(&sql).await, expected_error) {
+                let output = match (db.run(&sql).await, expected_error) {
                     (Ok(_), Some(_)) => {
                         return Err(TestErrorKind::Ok {
                             sql,
@@ -632,12 +638,17 @@ impl<D: AsyncDB> Runner<D> {
     fn should_skip(&self, conditions: &[Condition]) -> bool {
         conditions
             .iter()
-            .any(|c| c.should_skip(self.db.engine_name()))
+            .any(|c| c.should_skip(self.dbs.engine_name()))
     }
 
     /// Set hook functions.
     pub fn set_hook(&mut self, hook: impl Hook + 'static) {
         self.hook = Some(Box::new(hook));
+    }
+
+    /// Choose db to run statement/query
+    fn choose_db(&self, conditions: &[Condition]) -> D {
+        todo!()
     }
 }
 
